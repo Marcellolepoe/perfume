@@ -1,0 +1,4 @@
+node_modules
+dist
+*.local
+parfumo_data.csv
