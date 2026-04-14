@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef, useDeferredValue } from 'react';
 import Fuse from 'fuse.js';
 import {
   Search, Heart, ChevronLeft, X, BarChart3, Compass, Sparkles,
@@ -8,7 +8,7 @@ import type { Perfume } from './types';
 import { perfumes } from './data/loader';
 import { loadProfile, saveProfile, addPerfume, removePerfume } from './store';
 import { findSimilar, findSameNotesDifferentAccent } from './similarity';
-import { analyzeCollection, type CollectionAnalysis } from './analysis';
+import { analyzeCollection, getProfileRecommendations, type CollectionAnalysis } from './analysis';
 
 type View = 'home' | 'detail' | 'collection' | 'analysis' | 'profile';
 
@@ -319,7 +319,28 @@ function PerfumeDetail({
   );
 }
 
-function AnalysisView({ analysis, profileName }: { analysis: CollectionAnalysis; profileName: string }) {
+function AnalysisView({
+  analysis, profileName, collectionIds, onNavigate, onToggleCollection,
+}: {
+  analysis: CollectionAnalysis;
+  profileName: string;
+  collectionIds: string[];
+  onNavigate: (p: Perfume) => void;
+  onToggleCollection: (id: string) => void;
+}) {
+  const [recTab, setRecTab] = useState<'matches' | 'explore'>('matches');
+  const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
+
+  const recommendations = useMemo(
+    () => getProfileRecommendations(analysis, collectionIds, perfumes, 12),
+    [analysis, collectionIds]
+  );
+
+  const filteredExplores = useMemo(() => {
+    if (!categoryFilter) return recommendations.explores;
+    return recommendations.explores.filter(e => e.categories.includes(categoryFilter));
+  }, [recommendations.explores, categoryFilter]);
+
   if (analysis.totalPerfumes === 0) {
     return (
       <div className="text-center py-20">
@@ -336,16 +357,16 @@ function AnalysisView({ analysis, profileName }: { analysis: CollectionAnalysis;
     <div>
       <h3 className="text-[10px] tracking-[0.15em] uppercase text-warm-400 mb-3">{label}</h3>
       <div className="space-y-2">
-        {notes.slice(0, 8).map(n => (
+        {notes.slice(0, 6).map(n => (
           <div key={n.note} className="flex items-center gap-3">
             <span className="text-[11px] text-warm-600 w-20 text-right truncate">{n.note}</span>
-            <div className="flex-1 bg-warm-100 rounded-full h-4 overflow-hidden">
+            <div className="flex-1 bg-warm-100 rounded-full h-3 overflow-hidden">
               <div
                 className="h-full rounded-full transition-all duration-500"
                 style={{ width: `${Math.max(n.percentage, 8)}%`, backgroundColor: color }}
               />
             </div>
-            <span className="text-[10px] text-warm-400 w-10 tabular-nums">{n.percentage}%</span>
+            <span className="text-[10px] text-warm-400 w-8 tabular-nums">{n.percentage}%</span>
           </div>
         ))}
       </div>
@@ -353,29 +374,84 @@ function AnalysisView({ analysis, profileName }: { analysis: CollectionAnalysis;
   );
 
   return (
-    <div className="max-w-2xl mx-auto space-y-8">
-      <div className="bg-warm-50 rounded-3xl border border-warm-200/60 p-8">
-        <p className="text-[10px] tracking-[0.2em] uppercase text-warm-400 mb-1">
-          {profileName ? `${profileName}'s` : 'Your'} Scent Profile
-        </p>
-        <p className="text-xs text-warm-400">
-          Based on {analysis.totalPerfumes} perfume{analysis.totalPerfumes !== 1 ? 's' : ''}
-        </p>
+    <div className="max-w-3xl mx-auto space-y-8">
+      {/* Personality Overview */}
+      {analysis.personality && (
+        <div className="bg-gradient-to-br from-lavender-50 to-blush-50 rounded-3xl border border-lavender-100/60 p-8">
+          <div className="flex items-start gap-4">
+            <div className="w-14 h-14 rounded-2xl bg-white/60 border border-lavender-200/50 flex items-center justify-center shrink-0">
+              <Sparkles className="w-6 h-6 text-lavender-400" strokeWidth={1.5} />
+            </div>
+            <div>
+              <p className="text-[10px] tracking-[0.2em] uppercase text-lavender-400 mb-1">
+                {profileName ? `${profileName}'s` : 'Your'} Scent Identity
+              </p>
+              <h2 className="text-xl font-medium text-warm-800 mb-2">
+                {analysis.personality.archetype}
+              </h2>
+              <p className="text-sm text-warm-600 leading-relaxed">
+                {analysis.personality.description}
+              </p>
+              <div className="flex flex-wrap gap-2 mt-4">
+                {analysis.personality.traits.map(t => (
+                  <span key={t} className="text-[10px] tracking-wide text-lavender-500 bg-white/60 border border-lavender-200/50 px-3 py-1 rounded-full">
+                    {t}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
 
+          {/* Seasonality */}
+          {analysis.personality.seasonality.length > 0 && (
+            <div className="mt-6 pt-6 border-t border-lavender-200/30">
+              <p className="text-[10px] tracking-[0.15em] uppercase text-warm-400 mb-3">Best seasons for your scents</p>
+              <div className="flex gap-3">
+                {analysis.personality.seasonality.slice(0, 4).map(s => (
+                  <div key={s.season} className="flex-1 text-center">
+                    <div className="text-lg mb-1">
+                      {s.season === 'spring' ? '🌸' : s.season === 'summer' ? '☀️' : s.season === 'autumn' ? '🍂' : '❄️'}
+                    </div>
+                    <p className="text-[10px] text-warm-500 capitalize">{s.season}</p>
+                    <div className="mt-1 h-1 bg-warm-200 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-lavender-300 rounded-full"
+                        style={{ width: `${Math.min(s.strength, 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Quick Stats Row */}
+      <div className="grid grid-cols-3 gap-4">
+        <div className="bg-warm-50 rounded-2xl border border-warm-200/60 p-5 text-center">
+          <p className="text-2xl font-light text-warm-700">{analysis.totalPerfumes}</p>
+          <p className="text-[10px] tracking-[0.15em] uppercase text-warm-400 mt-1">Perfumes</p>
+        </div>
+        <div className="bg-warm-50 rounded-2xl border border-warm-200/60 p-5 text-center">
+          <p className="text-2xl font-light text-warm-700">{analysis.allNotesRanked.length}</p>
+          <p className="text-[10px] tracking-[0.15em] uppercase text-warm-400 mt-1">Unique Notes</p>
+        </div>
+        <div className="bg-warm-50 rounded-2xl border border-warm-200/60 p-5 text-center">
+          <p className="text-2xl font-light text-warm-700">{analysis.accordsRanked.length}</p>
+          <p className="text-[10px] tracking-[0.15em] uppercase text-warm-400 mt-1">Accords</p>
+        </div>
+      </div>
+
+      {/* Signature & Accords */}
+      <div className="bg-warm-50 rounded-3xl border border-warm-200/60 p-8">
         {analysis.signature.length > 0 && (
-          <div className="mt-6">
-            <p className="text-[10px] tracking-[0.15em] uppercase text-warm-400 mb-3">
-              Signature Notes
-            </p>
-            <p className="text-[10px] text-warm-300 mb-3 italic">
-              These define your taste — present in most of your collection
-            </p>
+          <div className="mb-6">
+            <p className="text-[10px] tracking-[0.15em] uppercase text-warm-400 mb-2">Your Signature Notes</p>
+            <p className="text-[10px] text-warm-300 mb-3">Present in 40%+ of your collection</p>
             <div className="flex flex-wrap gap-2">
               {analysis.signature.map(n => (
-                <span
-                  key={n}
-                  className="text-xs font-medium text-warm-700 bg-warm-100 border border-warm-200 px-4 py-1.5 rounded-full"
-                >
+                <span key={n} className="text-xs font-medium text-warm-700 bg-warm-100 border border-warm-200 px-4 py-1.5 rounded-full">
                   {n}
                 </span>
               ))}
@@ -384,30 +460,223 @@ function AnalysisView({ analysis, profileName }: { analysis: CollectionAnalysis;
         )}
 
         {analysis.accordsRanked.length > 0 && (
-          <div className="mt-6">
-            <p className="text-[10px] tracking-[0.15em] uppercase text-warm-400 mb-3">
-              Preferred Accords
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {analysis.accordsRanked.slice(0, 6).map(a => (
-                <div key={a.accord} className="flex items-center gap-1.5">
-                  <AccordBadge accord={a.accord} />
-                  <span className="text-[10px] text-warm-300">{a.percentage}%</span>
-                </div>
-              ))}
+          <div>
+            <p className="text-[10px] tracking-[0.15em] uppercase text-warm-400 mb-4">Accord Preferences</p>
+            <div className="space-y-2.5">
+              {analysis.accordsRanked.slice(0, 8).map((a, i) => {
+                const color = ACCORD_COLORS[a.accord.toLowerCase()] || '#A69882';
+                const maxPct = analysis.accordsRanked[0]?.percentage || 100;
+                const width = Math.round((a.percentage / maxPct) * 100);
+                return (
+                  <div key={a.accord} className="flex items-center gap-3">
+                    <span className="text-[11px] text-warm-600 w-16 text-right truncate capitalize">{a.accord}</span>
+                    <div className="flex-1 bg-warm-100 rounded-full h-5 overflow-hidden relative">
+                      <div
+                        className="h-full rounded-full transition-all duration-500 flex items-center"
+                        style={{ width: `${Math.max(width, 10)}%`, backgroundColor: `${color}40` }}
+                      >
+                        <div
+                          className="h-full rounded-full"
+                          style={{ width: '100%', backgroundColor: color, opacity: 0.7 + (0.3 * (1 - i / 8)) }}
+                        />
+                      </div>
+                    </div>
+                    <span className="text-[11px] font-medium text-warm-600 w-10 tabular-nums">{a.percentage}%</span>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
       </div>
 
-      <div className="bg-warm-50 rounded-3xl border border-warm-200/60 p-8 space-y-8">
-        <h2 className="text-[10px] tracking-[0.2em] uppercase text-warm-400">
-          Notes by Layer
-        </h2>
-        <NoteBar notes={analysis.topNotesRanked} label="Top notes you love" color="#96BDD5" />
-        <NoteBar notes={analysis.middleNotesRanked} label="Heart notes you love" color="#D4A0B0" />
-        <NoteBar notes={analysis.baseNotesRanked} label="Base notes you love" color="#DCBF82" />
+      {/* Note Pyramid Visualization */}
+      <div className="bg-warm-50 rounded-3xl border border-warm-200/60 p-8">
+        <h2 className="text-[10px] tracking-[0.2em] uppercase text-warm-400 mb-6">Your Note Pyramid</h2>
+        <div className="grid md:grid-cols-3 gap-6">
+          <NoteBar notes={analysis.topNotesRanked} label="🌿 Top Notes" color="#7AA4B8" />
+          <NoteBar notes={analysis.middleNotesRanked} label="🌸 Heart Notes" color="#D4A0B0" />
+          <NoteBar notes={analysis.baseNotesRanked} label="🪵 Base Notes" color="#C9A455" />
+        </div>
       </div>
+
+      {/* Note Categories Breakdown */}
+      {analysis.noteCategories.length > 0 && (
+        <div className="bg-warm-50 rounded-3xl border border-warm-200/60 p-8">
+          <h2 className="text-[10px] tracking-[0.2em] uppercase text-warm-400 mb-4">Scent Families You Love</h2>
+          <div className="space-y-3">
+            {analysis.noteCategories.slice(0, 6).map(cat => (
+              <div key={cat.category}>
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-xs text-warm-600">{cat.category}</span>
+                  <span className="text-[10px] text-warm-400">{cat.notes.slice(0, 3).join(', ')}</span>
+                </div>
+                <div className="h-2 bg-warm-100 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-lavender-300 to-blush-300 rounded-full transition-all duration-500"
+                    style={{ width: `${cat.percentage}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Recommendations Section */}
+      {(recommendations.matches.length > 0 || recommendations.explores.length > 0) && (
+        <div className="bg-warm-50 rounded-3xl border border-warm-200/60 p-8">
+          <h2 className="text-[10px] tracking-[0.2em] uppercase text-warm-400 mb-4">
+            Perfumes For You
+          </h2>
+
+          <div className="flex gap-2 mb-6">
+            <button
+              onClick={() => setRecTab('matches')}
+              className={`px-4 py-2 rounded-full text-xs tracking-wide transition-all ${
+                recTab === 'matches'
+                  ? 'bg-lavender-50 text-lavender-500 border border-lavender-200'
+                  : 'text-warm-400 border border-warm-200/60 hover:border-warm-300'
+              }`}
+            >
+              <Sparkles className="w-3 h-3 inline mr-1.5" strokeWidth={1.5} />
+              Perfect Matches ({recommendations.matches.length})
+            </button>
+            <button
+              onClick={() => setRecTab('explore')}
+              className={`px-4 py-2 rounded-full text-xs tracking-wide transition-all ${
+                recTab === 'explore'
+                  ? 'bg-sage-50 text-sage-500 border border-sage-200'
+                  : 'text-warm-400 border border-warm-200/60 hover:border-warm-300'
+              }`}
+            >
+              <Compass className="w-3 h-3 inline mr-1.5" strokeWidth={1.5} />
+              Explore New Territory ({recommendations.explores.length})
+            </button>
+          </div>
+
+          {recTab === 'matches' && (
+            <div>
+              <p className="text-xs text-warm-400 mb-4">
+                Scored by how well they match your taste for {analysis.accordsRanked[0]?.accord.toLowerCase()} and {analysis.allNotesRanked[0]?.note.toLowerCase()}
+              </p>
+              <div className="grid sm:grid-cols-2 gap-3">
+                {recommendations.matches.slice(0, 8).map(m => (
+                  <div
+                    key={m.perfume.id}
+                    className="bg-white/50 rounded-2xl border border-warm-200/60 p-4 hover:border-warm-300 cursor-pointer transition-all group"
+                    onClick={() => onNavigate(m.perfume)}
+                  >
+                    <div className="flex justify-between items-start mb-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-sm text-warm-800 truncate">{m.perfume.name}</p>
+                        <p className="text-[11px] text-warm-400 mt-0.5">{m.perfume.brand}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1">
+                          <div className="w-10 h-1.5 bg-warm-100 rounded-full overflow-hidden">
+                            <div
+                              className="h-full rounded-full bg-gradient-to-r from-lavender-400 to-blush-400"
+                              style={{ width: `${m.score}%` }}
+                            />
+                          </div>
+                          <span className="text-[10px] font-medium text-lavender-500">{m.score}%</span>
+                        </div>
+                        <button
+                          onClick={e => { e.stopPropagation(); onToggleCollection(m.perfume.id); }}
+                          className="p-1.5 rounded-full text-warm-300 hover:text-blush-400 hover:bg-blush-50 transition-colors"
+                        >
+                          <Heart className="w-4 h-4" strokeWidth={1.5} />
+                        </button>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-1 mb-2">
+                      {m.perfume.accords.slice(0, 3).map((a, i) => <AccordBadge key={`${a}-${i}`} accord={a} />)}
+                    </div>
+                    <p className="text-[10px] text-warm-400 italic">
+                      {m.matchReasons.slice(0, 2).join(' · ')}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {recTab === 'explore' && (
+            <div>
+              <p className="text-xs text-warm-400 mb-3">
+                These share your favorites but introduce new notes to expand your palette
+              </p>
+              
+              {/* Category filter */}
+              <div className="flex flex-wrap gap-2 mb-4">
+                <button
+                  onClick={() => setCategoryFilter(null)}
+                  className={`text-[10px] px-3 py-1.5 rounded-full transition-all ${
+                    !categoryFilter ? 'bg-sage-100 text-sage-600 border border-sage-200' : 'border border-warm-200/60 text-warm-400 hover:border-warm-300'
+                  }`}
+                >
+                  All ({recommendations.explores.length})
+                </button>
+                {['woody', 'floral', 'citrus', 'spicy', 'sweet', 'fresh'].map(cat => {
+                  const count = recommendations.explores.filter(e => e.categories.includes(cat)).length;
+                  return (
+                    <button
+                      key={cat}
+                      onClick={() => setCategoryFilter(categoryFilter === cat ? null : cat)}
+                      className={`text-[10px] px-3 py-1.5 rounded-full capitalize transition-all ${
+                        categoryFilter === cat ? 'bg-sage-100 text-sage-600 border border-sage-200' : 'border border-warm-200/60 text-warm-400 hover:border-warm-300'
+                      } ${count === 0 ? 'opacity-40' : ''}`}
+                      disabled={count === 0}
+                    >
+                      {cat} {count > 0 && `(${count})`}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="grid sm:grid-cols-2 gap-3">
+                {filteredExplores.slice(0, 8).map(({ perfume: p, newNotes, categories }) => (
+                  <div
+                    key={p.id}
+                    className="bg-white/50 rounded-2xl border border-warm-200/60 p-4 hover:border-warm-300 cursor-pointer transition-all"
+                    onClick={() => onNavigate(p)}
+                  >
+                    <div className="flex justify-between items-start">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-sm text-warm-800 truncate">{p.name}</p>
+                        <p className="text-[11px] text-warm-400 mt-0.5">{p.brand}</p>
+                      </div>
+                      <button
+                        onClick={e => { e.stopPropagation(); onToggleCollection(p.id); }}
+                        className="p-1.5 rounded-full text-warm-300 hover:text-blush-400 hover:bg-blush-50 transition-colors"
+                      >
+                        <Heart className="w-4 h-4" strokeWidth={1.5} />
+                      </button>
+                    </div>
+                    {categories.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        {categories.slice(0, 3).map(c => (
+                          <span key={c} className="text-[9px] px-2 py-0.5 rounded-full bg-sage-50 text-sage-500 capitalize border border-sage-100">
+                            {c}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <div className="mt-2">
+                      <span className="text-[9px] tracking-[0.1em] uppercase text-warm-300">New notes to try</span>
+                      <p className="text-[11px] text-sage-600 mt-0.5">{newNotes.join(', ')}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {filteredExplores.length === 0 && (
+                <p className="text-center text-xs text-warm-300 py-8">No perfumes found with {categoryFilter} notes to explore</p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -509,11 +778,14 @@ function ProfileView({
 
 export default function App() {
   const [view, setView] = useState<View>('home');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchInput, setSearchInput] = useState('');
   const [selectedPerfume, setSelectedPerfume] = useState<Perfume | null>(null);
   const [profile, setProfile] = useState(loadProfile);
   const [accordFilter, setAccordFilter] = useState<string | null>(null);
   const [displayCount, setDisplayCount] = useState(48);
+
+  // Defer search to avoid blocking UI on every keystroke
+  const deferredSearch = useDeferredValue(searchInput);
 
   const collectionIds = profile.perfumeIds;
 
@@ -527,16 +799,17 @@ export default function App() {
         { name: 'baseNotes', weight: 1 },
         { name: 'accords', weight: 1.5 },
       ],
-      threshold: 0.3,
+      threshold: 0.35,
       includeScore: true,
+      ignoreLocation: true,
     }),
     []
   );
 
   const searchResults = useMemo(() => {
-    if (!searchQuery.trim()) return null;
-    return fuse.search(searchQuery, { limit: 200 }).map(r => r.item);
-  }, [searchQuery, fuse]);
+    if (!deferredSearch.trim()) return null;
+    return fuse.search(deferredSearch, { limit: 100 }).map(r => r.item);
+  }, [deferredSearch, fuse]);
 
   const filteredPerfumes = useMemo(() => {
     let list = searchResults || perfumes;
@@ -549,7 +822,7 @@ export default function App() {
   const displayPerfumes = filteredPerfumes.slice(0, displayCount);
 
   // Reset page when filters change
-  useEffect(() => { setDisplayCount(48); }, [searchQuery, accordFilter]);
+  useEffect(() => { setDisplayCount(48); }, [deferredSearch, accordFilter]);
 
   const collectionPerfumes = useMemo(
     () => perfumes.filter(p => collectionIds.includes(p.id)),
@@ -676,7 +949,13 @@ export default function App() {
             onNavigate={navigateToDetail}
           />
         ) : view === 'analysis' ? (
-          <AnalysisView analysis={analysis} profileName={profile.name} />
+          <AnalysisView
+            analysis={analysis}
+            profileName={profile.name}
+            collectionIds={collectionIds}
+            onNavigate={navigateToDetail}
+            onToggleCollection={toggleCollection}
+          />
         ) : view === 'profile' ? (
           <ProfileView
             profileName={profile.name}
@@ -730,14 +1009,14 @@ export default function App() {
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-warm-300" strokeWidth={1.5} />
                 <input
                   type="text"
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
+                  value={searchInput}
+                  onChange={e => setSearchInput(e.target.value)}
                   placeholder="Search by name, brand, or note..."
                   className="w-full pl-11 pr-10 py-3 rounded-2xl border border-warm-200/60 bg-warm-50 text-sm text-warm-800 placeholder:text-warm-300 focus:outline-none focus:border-warm-300 transition-colors"
                 />
-                {searchQuery && (
+                {searchInput && (
                   <button
-                    onClick={() => setSearchQuery('')}
+                    onClick={() => setSearchInput('')}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-warm-300 hover:text-warm-500 transition-colors"
                   >
                     <X className="w-4 h-4" strokeWidth={1.5} />
@@ -773,7 +1052,7 @@ export default function App() {
 
             <p className="text-[10px] tracking-widest uppercase text-warm-300 mb-4">
               {displayPerfumes.length} of {filteredPerfumes.length} perfumes
-              {searchQuery && ` for "${searchQuery}"`}
+              {searchInput && ` for "${searchInput}"`}
             </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">

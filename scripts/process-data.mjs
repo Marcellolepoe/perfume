@@ -87,10 +87,13 @@ for (let i = 1; i < lines.length; i++) {
 // Sort by rating count descending so most popular are first
 perfumes.sort((a, b) => (b.rc || 0) - (a.rc || 0));
 
+// Take top 8000 to keep bundle size reasonable (~2.5MB raw, ~500KB gzip)
+const topPerfumes = perfumes.slice(0, 8000);
+
 // Build unique notes with frequency
 const noteFreq = {};
 const notePositions = {};
-for (const p of perfumes) {
+for (const p of topPerfumes) {
   for (const n of p.t) {
     noteFreq[n] = (noteFreq[n] || 0) + 1;
     if (!notePositions[n]) notePositions[n] = { top: 0, middle: 0, base: 0 };
@@ -114,7 +117,7 @@ const notes = Object.entries(noteFreq)
 
 // Build unique accords
 const accordFreq = {};
-for (const p of perfumes) {
+for (const p of topPerfumes) {
   for (const a of p.a) {
     accordFreq[a] = (accordFreq[a] || 0) + 1;
   }
@@ -125,10 +128,10 @@ const accords = Object.entries(accordFreq)
 
 mkdirSync(join(root, 'src', 'data'), { recursive: true });
 
-writeFileSync(join(root, 'src', 'data', 'perfumes.json'), JSON.stringify(perfumes));
+writeFileSync(join(root, 'src', 'data', 'perfumes.json'), JSON.stringify(topPerfumes));
 writeFileSync(join(root, 'src', 'data', 'notes.json'), JSON.stringify(notes));
 writeFileSync(join(root, 'src', 'data', 'accords.json'), JSON.stringify(accords));
 
-const jsonSize = (Buffer.byteLength(JSON.stringify(perfumes)) / 1024 / 1024).toFixed(1);
-console.log(`Processed ${perfumes.length} perfumes (${jsonSize}MB JSON), ${notes.length} unique notes, ${accords.length} unique accords`);
-console.log(`Top 5: ${perfumes.slice(0, 5).map(p => p.n).join(', ')}`);
+const jsonSize = (Buffer.byteLength(JSON.stringify(topPerfumes)) / 1024 / 1024).toFixed(1);
+console.log(`Processed ${topPerfumes.length} perfumes (${jsonSize}MB JSON), ${notes.length} unique notes, ${accords.length} unique accords`);
+console.log(`Top 5: ${topPerfumes.slice(0, 5).map(p => p.n).join(', ')}`);
