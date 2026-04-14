@@ -5,7 +5,7 @@ import {
   User, Download, Upload, ArrowUpRight,
 } from 'lucide-react';
 import type { Perfume } from './types';
-import { perfumes } from './data/loader';
+import { loadPerfumes } from './data/loader';
 import { loadProfile, saveProfile, addPerfume, removePerfume } from './store';
 import { findSimilar, findSameNotesDifferentAccent } from './similarity';
 import { analyzeCollection, getProfileRecommendations, type CollectionAnalysis } from './analysis';
@@ -320,11 +320,12 @@ function PerfumeDetail({
 }
 
 function AnalysisView({
-  analysis, profileName, collectionIds, onNavigate, onToggleCollection,
+  analysis, profileName, collectionIds, allPerfumes, onNavigate, onToggleCollection,
 }: {
   analysis: CollectionAnalysis;
   profileName: string;
   collectionIds: string[];
+  allPerfumes: Perfume[];
   onNavigate: (p: Perfume) => void;
   onToggleCollection: (id: string) => void;
 }) {
@@ -332,8 +333,8 @@ function AnalysisView({
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
 
   const recommendations = useMemo(
-    () => getProfileRecommendations(analysis, collectionIds, perfumes, 12),
-    [analysis, collectionIds]
+    () => getProfileRecommendations(analysis, collectionIds, allPerfumes, 12),
+    [analysis, collectionIds, allPerfumes]
   );
 
   const filteredExplores = useMemo(() => {
@@ -776,7 +777,33 @@ function ProfileView({
   );
 }
 
+function LoadingScreen() {
+  return (
+    <div className="min-h-screen bg-cream flex items-center justify-center">
+      <div className="text-center">
+        <div className="w-16 h-16 rounded-full bg-lavender-50 border border-lavender-100 flex items-center justify-center mx-auto mb-4 animate-pulse">
+          <Sparkles className="w-6 h-6 text-lavender-300" strokeWidth={1.5} />
+        </div>
+        <p className="text-warm-500 text-sm">Loading fragrances...</p>
+        <div className="mt-4 w-48 h-1 bg-warm-100 rounded-full overflow-hidden mx-auto">
+          <div className="h-full bg-gradient-to-r from-lavender-300 to-blush-300 rounded-full animate-[loading_1.5s_ease-in-out_infinite]" 
+               style={{ width: '30%', animation: 'loading 1.5s ease-in-out infinite' }} />
+        </div>
+      </div>
+      <style>{`
+        @keyframes loading {
+          0% { transform: translateX(-100%); }
+          50% { transform: translateX(250%); }
+          100% { transform: translateX(-100%); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
 export default function App() {
+  const [perfumes, setPerfumes] = useState<Perfume[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [view, setView] = useState<View>('home');
   const [searchInput, setSearchInput] = useState('');
   const [selectedPerfume, setSelectedPerfume] = useState<Perfume | null>(null);
@@ -784,13 +811,21 @@ export default function App() {
   const [accordFilter, setAccordFilter] = useState<string | null>(null);
   const [displayCount, setDisplayCount] = useState(48);
 
+  // Load perfume data on mount
+  useEffect(() => {
+    loadPerfumes().then(data => {
+      setPerfumes(data);
+      setIsLoading(false);
+    });
+  }, []);
+
   // Defer search to avoid blocking UI on every keystroke
   const deferredSearch = useDeferredValue(searchInput);
 
   const collectionIds = profile.perfumeIds;
 
   const fuse = useMemo(
-    () => new Fuse(perfumes, {
+    () => perfumes.length > 0 ? new Fuse(perfumes, {
       keys: [
         { name: 'name', weight: 3 },
         { name: 'brand', weight: 2 },
@@ -802,12 +837,12 @@ export default function App() {
       threshold: 0.35,
       includeScore: true,
       ignoreLocation: true,
-    }),
-    []
+    }) : null,
+    [perfumes]
   );
 
   const searchResults = useMemo(() => {
-    if (!deferredSearch.trim()) return null;
+    if (!deferredSearch.trim() || !fuse) return null;
     return fuse.search(deferredSearch, { limit: 100 }).map(r => r.item);
   }, [deferredSearch, fuse]);
 
@@ -817,7 +852,7 @@ export default function App() {
       list = list.filter(p => p.accords.some(a => a.toLowerCase() === accordFilter.toLowerCase()));
     }
     return list;
-  }, [searchResults, accordFilter]);
+  }, [searchResults, accordFilter, perfumes]);
 
   const displayPerfumes = filteredPerfumes.slice(0, displayCount);
 
@@ -892,6 +927,10 @@ export default function App() {
     input.click();
   };
 
+  if (isLoading) {
+    return <LoadingScreen />;
+  }
+
   return (
     <div className="min-h-screen bg-cream">
       {/* Header */}
@@ -953,6 +992,7 @@ export default function App() {
             analysis={analysis}
             profileName={profile.name}
             collectionIds={collectionIds}
+            allPerfumes={perfumes}
             onNavigate={navigateToDetail}
             onToggleCollection={toggleCollection}
           />
